@@ -1,98 +1,109 @@
-import tensorflow as tf
+﻿import tensorflow as tf
 import numpy as np
-from gensim.matutils import unitvec
-from tools import W2V
 from cca import calc_CCA
 
 
-def xaver_init(n_inputs, n_outputs, uniform=False):
-    '''
-    :param n_inputs: 입력층 크기
-    :param n_outputs: 출력층 크기
-    :param uniform: True 이면 균등분포 , False 이면 정규분포
-    :return: 가중치
-    '''
-    if uniform:
-        init_range = tf.sqrt(6.0/ (n_inputs + n_outputs))
-        return tf.random_uniform_initializer(-init_range, init_range)
+class DCCA(object):
+    def __init__(self, sess, input_dim, hiddens_dim, output_dim, cca_dim, reg, activation):
+        self.sess = sess
+        self.input_dim = input_dim
+        self.hiddens_dim = hiddens_dim
+        self.output_dim = output_dim
+        self.cca_dim = cca_dim
+        self.reg = reg
+        self.activation = activation
+        
+        self.f_input, self.f_output = self.build_network('f')
+        self.g_input, self.g_output = self.build_network('g')
+        
+        self.U = tf.get_variable('U', [output_dim, cca_dim], trainable=False)
+        self.V = tf.get_variable('V', [output_dim, cca_dim], trainable=False)
+        
+        self.f_cca = tf.matmul(sef.f_output, self.f_proj, name='f_cca')
+        self.g_cca = tf.matmul(sef.f_output, self.g_proj, name='g_cca')
 
-    else:
-        stddev = tf.sqrt(3.0 / (n_inputs + n_outputs))
-        return tf.truncated_normal_initializer(stddev=stddev)
+    def _build_network(self, name):
+        print(f'Building {name} network...')
+        input_layer = tf.placeholder('float', shape=[None, input_dim], name=f'{name}_input')
+        for i, hidden_dim in enumerate(self.hiddens_dim, 1):
+            if i == 1:
+                hidden_layer = tf.layers.dense(input_layer, hidden_dim, activation=activation, name=f'{name}_hidden{i}')
+            else:
+                 hidden_layer = tf.layers.dense(hidden_layer, hidden_dim, activation=activation, name=f'{name}_hidden{i}')
+        ouput_layer =  tf.layers.dense(hidden_layer, self.output_dim, name=f'{name}_output')
+        return input_layer, output_layer
+        
+    def train(self, train_data, valid_data=None, learning_rate=0.001, batch_size=128, epochs=100, keep_prob=0.3,
+              optimizer=tf.train.AdamOptimizer, save_path='', load_path='', display_size=5, save_size=5):
+        
+        if load_path:
+            self.load(load_path)
+        else:
+            self.sess.run(tf.global_variables_initializer())
 
+        train_loss_history = []
+        valid_loss_history = []
+        
+        train_x1, train_x2 = train_data
+        valid_x1, valid_x2 = valid_data
+        
+        U_ph = tf.placeholder('float', [self.hiddens_dim[-1], self.output_dim])
+        V_ph = tf.placeholder('float', [self.hiddens_dim[-1], self.output_dim])
+        UtF = tf.matmul(tf.transpose(U), tf.transpose(f_out))
+        GtV = tf.matmul(g_out, V)
+        canon_corr = tf.trace(tf.matmul(UtF, GtV))
+        update = optimizer(learning_rate).minimize(-canon_corr)
+        
+        for epoch_i in range(1, epochs+1):
+            for batch_x1, batch_x2 in self._get_batch(x1, x2):
+                f_output_ = self.sess.run(self.f_output, feed_dict={self.f_input: batch_x1})
+                g_output_ = self.sess.run(self.g_output, feed_dict={self.g_input: batch_x2})
+                U_, V_ = self.calc_CCA(f_output_, g_output_)
+                self.U.assign(U_)
+                self.V.assign(V_)
+                self.sess.run(update, feed_dict={self.f_input: batch_x1,
+                                                 self.g_input: batch_x2,
+                                                 U_ph: U_,
+                                                 V_ph: V_,
+                                                 self.keep_prob: keep_prob})
 
-def build_network(input_dim, hidden_dim, output_dim, name):
-    input_layer = tf.placeholder("float", shape=[None, input_dim], name=name + '_input')
-    W1 = tf.get_variable(name=name + '_W1', shape=[input_dim, hidden_dim], initializer=xaver_init(input_dim, hidden_dim))
-    b1 = tf.Variable(tf.zeros([hidden_dim]), name=name + '_b1')
-    hidden_layer = tf.nn.tanh(tf.matmul(input_layer, W1) + b1, name=name + '_hidden')
-    W2 = tf.get_variable(name=name + '_W2', shape=[hidden_dim, output_dim], initializer=xaver_init(hidden_dim, output_dim))
-    b2 = tf.Variable(tf.zeros([output_dim]), name=name + '_b2')
-    output_layer = tf.nn.l2_normalize(tf.nn.tanh(tf.matmul(hidden_layer, W2) + b2), dim=1, name=name + '_output')
+            if epoch_i % display_size == 0:
+                train_loss = self.sess.run(update, feed_dict={self.f_input: train_x1,
+                                                              self.g_input: train_x2,
+                                                              U_ph: U_,
+                                                              V_ph: V_,
+                                                              self.keep_prob: 1.0})
+                train_loss_history.append(train_loss)
+                if valid_data is not None:
+                     valid_loss = self.sess.run(update, feed_dict={self.f_input: valid_x1,
+                                                                   self.g_input: valid_x2,
+                                                                   U_ph: U_,
+                                                                   V_ph: V_,
+                                                                   self.keep_prob: 1.0})
+                    valid_loss_history.append(valid_loss)
+                    print('Epoch {:>3}/{} Training loss: {:>6.3f}  - Validation loss: {:>6.3f}'.
+                          format(epoch_i, epochs, train_loss, valid_loss))
+                else:
+                    print('Epoch {:>3}/{} Training loss: {:>6.3f}'.format(epoch_i, epochs, train_loss))
+            if save_path and save_size and epoch_i % save_size == 0:
+                self.save(save_path, epoch_i)
+                
+        return train_loss_history, valid_loss_history
 
-    return input_layer, output_layer
+    def predict(self, x1, x2, load_path=''):
+        if load_path:
+            self.load(load_path)
+        
+        x1_proj = self.sess.run(self.f_cca, feed_dict={self.f_input: x1})
+        x2_proj = self.sess.run(self.f_cca, feed_dict={self.f_input: x2})
+        return x1_proj, x2_proj
+        
+    def save(self, save_path, global_step=None):
+        saver = tf.train.Saver()
+        saver.save(self.sess, save_path, global_step, write_meta_graph=False)
+        print('Model save at ' + save_path + '-' + str(global_step))
 
-
-def build_DCCA(train_vec, reg, n_components, epochs, learning_rate, save_path):
-    '''
-    :param train_vec: 학습벡터 쌍
-    :param reg: 정규화 매개변수
-    :param n_components: 투영할 벡터공간의 차원
-    :param epochs: 세대
-    :param learning_rate: 확습률률
-    :param save_path: 심층 신경망 모델 저장 장소
-    '''
-
-    # set up the DCCA network
-
-    n = len(train_vec[0][0])
-    f_in, f_out = build_network(n, 5*n,  n,  name='f')
-    g_in, g_out = build_network(n, 5*n,  n,  name='g')
-
-    U = tf.placeholder("float", [n, n_components])
-    V = tf.placeholder("float", [n, n_components])
-    UtF = tf.matmul(tf.transpose(U), tf.transpose(f_out))
-    GtV = tf.matmul(g_out, V)
-
-    canon_corr = tf.trace(tf.matmul(UtF, GtV))
-    corr_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(-canon_corr)
-    init = tf.initialize_all_variables()
-    saver = tf.train.Saver()
-    with tf.Session() as sess:
-        sess.run(init)
-        for epoch in range(epochs):
-            f_out_ = sess.run(f_out, feed_dict={f_in: train_vec[0]})
-            g_out_ = sess.run(g_out, feed_dict={g_in: train_vec[1]})
-            U_, V_ = calc_CCA(f_out_, g_out_, reg, n_components)
-            sess.run(corr_step, feed_dict={f_in: train_vec[0], g_in: train_vec[1], U: U_, V: V_})
-
-        saver.save(sess, save_path)
-
-
-def project_DCCA(X1, X2, train_vec, restore_path, reg=0.001, n_components=100):
-    '''
-    :param X1: W2V
-    :param X2: W2V
-    :param train_vec: 학습벡터 쌍
-    :param restore_path:
-    :param reg: 정규화 매개 변수
-    :param n_components: 투영할 벡터공간의 차원
-    :return: 투영된 언어 쌍
-    '''
-    n = X1.syn.shape[1]
-    f_in, f_out = build_network(n, 5*n, n, name='f')
-    g_in, g_out = build_network(n, 5*n, n, name='g')
-
-    saver = tf.train.Saver()
-    with tf.Session() as sess:
-        saver.restore(sess, restore_path)
-        f_output = sess.run(f_out, feed_dict={f_in: X1.syn})
-        g_output = sess.run(g_out, feed_dict={g_in: X2.syn})
-        train1_out = sess.run(f_out, feed_dict={f_in: train_vec[0]})
-        train2_out = sess.run(g_out, feed_dict={g_in: train_vec[0]})
-
-    U, V = calc_CCA(train1_out, train2_out, reg, n_components)
-    x, y = np.dot(f_output, U), np.dot(g_output, V)
-    X1_syn, X2_syn = np.apply_along_axis(unitvec, 1, x), np.apply_along_axis(unitvec, 1, y)
-
-    return W2V(X1.index2vec, X1_syn), W2V(X2.index2vec, X2_syn)
+    def load(self, path):
+        saver = tf.train.Saver()
+        saver.restore(self.sess, path)
+        print('Model restored from' + path)
