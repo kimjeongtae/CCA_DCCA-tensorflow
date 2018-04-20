@@ -1,9 +1,4 @@
-﻿import tensorflow as tf
-import numpy as np
-from cca import calc_CCA
-
-
-class DCCA(object):
+﻿class DCCA(object):
     def __init__(self, sess, input_dim, hiddens_dim, output_dim, cca_dim, reg, activation):
         self.sess = sess
         self.input_dim = input_dim
@@ -12,7 +7,7 @@ class DCCA(object):
         self.cca_dim = cca_dim
         self.reg = reg
         self.activation = activation
-        
+        self.training = tf.placeholder(tf.bool)   
         self.f_input, self.f_output = self.build_network('f')
         self.g_input, self.g_output = self.build_network('g')
         
@@ -24,16 +19,16 @@ class DCCA(object):
 
     def _build_network(self, name):
         print(f'Building {name} network...')
-        input_layer = tf.placeholder('float', shape=[None, input_dim], name=f'{name}_input')
+        input_layer = tf.placeholder(tf.float32, shape=[None, input_dim], name=f'{name}_input')
         for i, hidden_dim in enumerate(self.hiddens_dim, 1):
             if i == 1:
-                hidden_layer = tf.layers.dense(input_layer, hidden_dim, activation=activation, name=f'{name}_hidden{i}')
+                hidden_layer = tf.layers.dropout(tf.layers.dense(input_layer, hidden_dim, activation=activation), 0.7, name=f'{name}_hidden{i}')
             else:
-                 hidden_layer = tf.layers.dense(hidden_layer, hidden_dim, activation=activation, name=f'{name}_hidden{i}')
+                hidden_layer = tf.layers.dropout(tf.layers.dense(hidden_layer, hidden_dim, activation=activation), 0.7, name=f'{name}_hidden{i}')
         ouput_layer =  tf.layers.dense(hidden_layer, self.output_dim, name=f'{name}_output')
         return input_layer, output_layer
         
-    def train(self, train_data, valid_data=None, learning_rate=0.001, batch_size=128, epochs=100, keep_prob=0.3,
+    def train(self, train_data, valid_data=None, learning_rate=0.001, batch_size=128, epochs=100,
               optimizer=tf.train.AdamOptimizer, save_path='', load_path='', display_size=5, save_size=5):
         
         if load_path:
@@ -47,8 +42,8 @@ class DCCA(object):
         train_x1, train_x2 = train_data
         valid_x1, valid_x2 = valid_data
         
-        U_ph = tf.placeholder('float', [self.hiddens_dim[-1], self.output_dim])
-        V_ph = tf.placeholder('float', [self.hiddens_dim[-1], self.output_dim])
+        U_ph = tf.placeholder(tf.float32, [self.hiddens_dim[-1], self.output_dim])
+        V_ph = tf.placeholder(tf.float32, [self.hiddens_dim[-1], self.output_dim])
         UtF = tf.matmul(tf.transpose(U), tf.transpose(f_out))
         GtV = tf.matmul(g_out, V)
         canon_corr = tf.trace(tf.matmul(UtF, GtV))
@@ -65,21 +60,21 @@ class DCCA(object):
                                                  self.g_input: batch_x2,
                                                  U_ph: U_,
                                                  V_ph: V_,
-                                                 self.keep_prob: keep_prob})
+                                                 self.training: True})
 
             if epoch_i % display_size == 0:
                 train_loss = self.sess.run(update, feed_dict={self.f_input: train_x1,
                                                               self.g_input: train_x2,
                                                               U_ph: U_,
                                                               V_ph: V_,
-                                                              self.keep_prob: 1.0})
+                                                              self.training: False})
                 train_loss_history.append(train_loss)
                 if valid_data is not None:
                      valid_loss = self.sess.run(update, feed_dict={self.f_input: valid_x1,
                                                                    self.g_input: valid_x2,
                                                                    U_ph: U_,
                                                                    V_ph: V_,
-                                                                   self.keep_prob: 1.0})
+                                                                   self.training: False})
                     valid_loss_history.append(valid_loss)
                     print('Epoch {:>3}/{} Training loss: {:>6.3f}  - Validation loss: {:>6.3f}'.
                           format(epoch_i, epochs, train_loss, valid_loss))
@@ -94,8 +89,8 @@ class DCCA(object):
         if load_path:
             self.load(load_path)
         
-        x1_proj = self.sess.run(self.f_cca, feed_dict={self.f_input: x1})
-        x2_proj = self.sess.run(self.f_cca, feed_dict={self.f_input: x2})
+        x1_proj = self.sess.run(self.f_cca, feed_dict={self.f_input: x1, self.training: False})
+        x2_proj = self.sess.run(self.f_cca, feed_dict={self.f_input: x2, self.training: False})
         return x1_proj, x2_proj
         
     def save(self, save_path, global_step=None):
