@@ -1,4 +1,8 @@
-﻿class DCCA(object):
+import tensorflow as tf
+from cca import calc_CCA
+
+
+class DCCA(object):
     def __init__(self, sess, input_dim, hiddens_dim, output_dim, cca_dim, reg, activation):
         self.sess = sess
         self.input_dim = input_dim
@@ -59,7 +63,7 @@
             for batch_x1, batch_x2 in self._get_batch(train_x1, train_x2):
                 f_output_ = self.sess.run(self.f_output, feed_dict={self.f_input: batch_x1})
                 g_output_ = self.sess.run(self.g_output, feed_dict={self.g_input: batch_x2})
-                U_, V_ = self.calc_CCA(f_output_, g_output_)
+                U_, V_ = calc_CCA(f_output_, g_output_)
                 self.U.assign(U_)
                 self.V.assign(V_)
                 self.sess.run(update, feed_dict={self.f_input: batch_x1,
