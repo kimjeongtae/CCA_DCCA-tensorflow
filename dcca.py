@@ -27,7 +27,13 @@
                 hidden_layer = tf.layers.dropout(tf.layers.dense(hidden_layer, hidden_dim, activation=activation), 0.7, name=f'{name}_hidden{i}')
         ouput_layer =  tf.layers.dense(hidden_layer, self.output_dim, name=f'{name}_output')
         return input_layer, output_layer
-        
+    
+    def _get_batch(x1, x2, batch_size):
+        for batch_i in range(len(x1) // batch_size):
+            start_i = batch_i * batch_size
+            end_i = (batch_i + 1) * batch_size
+            yield x1[start_i:end_i], x2[start_i: end_i]
+                     
     def train(self, train_data, valid_data=None, learning_rate=0.001, batch_size=128, epochs=100,
               optimizer=tf.train.AdamOptimizer, save_path='', load_path='', display_size=5, save_size=5):
         
@@ -50,7 +56,7 @@
         update = optimizer(learning_rate).minimize(-canon_corr)
         
         for epoch_i in range(1, epochs+1):
-            for batch_x1, batch_x2 in self._get_batch(x1, x2):
+            for batch_x1, batch_x2 in self._get_batch(train_x1, train_x2):
                 f_output_ = self.sess.run(self.f_output, feed_dict={self.f_input: batch_x1})
                 g_output_ = self.sess.run(self.g_output, feed_dict={self.g_input: batch_x2})
                 U_, V_ = self.calc_CCA(f_output_, g_output_)
