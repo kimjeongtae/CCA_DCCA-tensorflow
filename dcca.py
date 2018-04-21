@@ -28,7 +28,7 @@
         ouput_layer =  tf.layers.dense(hidden_layer, self.output_dim, name=f'{name}_output')
         return input_layer, output_layer
     
-    def _get_batch(x1, x2, batch_size):
+    def _get_batch(self, x1, x2, batch_size):
         for batch_i in range(len(x1) // batch_size):
             start_i = batch_i * batch_size
             end_i = (batch_i + 1) * batch_size
